@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MRI Viewer</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --panel2:#1a1f2b; --line:#262c3a;
+    --text:#e6e9f0; --muted:#8b93a7; --accent:#4c8dff; --accent2:#2b6ae0;
+    --good:#39d98a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  #app{display:grid;grid-template-columns:290px 1fr;height:100%}
+  /* Sidebar */
+  #side{background:var(--panel);border-right:1px solid var(--line);display:flex;
+    flex-direction:column;min-height:0}
+  #side h1{font-size:15px;margin:0;padding:14px 16px 10px;letter-spacing:.3px}
+  #side h1 small{display:block;color:var(--muted);font-weight:400;font-size:11px;margin-top:2px}
+  #loadbar{padding:0 16px 12px;border-bottom:1px solid var(--line)}
+  .btn{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:#fff;
+    border:none;border-radius:7px;padding:8px 12px;font-size:13px;cursor:pointer;width:100%;
+    justify-content:center;font-weight:600}
+  .btn:hover{background:var(--accent2)}
+  .btn.sec{background:var(--panel2);color:var(--text);border:1px solid var(--line);font-weight:500}
+  .btn.sec:hover{border-color:var(--accent)}
+  #status{font-size:11px;color:var(--muted);margin-top:8px;min-height:14px}
+  #list{overflow:auto;flex:1;padding:8px}
+  .grp{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+    padding:12px 8px 4px}
+  .item{padding:8px 10px;border-radius:7px;cursor:pointer;border:1px solid transparent}
+  .item:hover{background:var(--panel2)}
+  .item.active{background:var(--panel2);border-color:var(--accent)}
+  .item .t{font-weight:600}
+  .item .m{font-size:11px;color:var(--muted);margin-top:2px}
+  .item.disabled{opacity:.5;cursor:default}
+  .tag{display:inline-block;font-size:9px;padding:1px 5px;border-radius:4px;
+    background:#243049;color:#9db6ff;margin-left:6px;vertical-align:middle}
+  /* Main */
+  #main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  #toolbar{display:flex;align-items:center;gap:14px;padding:10px 16px;
+    background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  #toolbar2{display:flex;align-items:center;gap:12px;padding:8px 16px;
+    background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  #toolbar2 .lbl{font-size:12px;color:var(--muted)}
+  #measure.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:transparent;color:var(--muted);border:none;padding:7px 12px;
+    cursor:pointer;font-size:12px;font-weight:600}
+  .seg button.on{background:var(--accent);color:#fff}
+  .ctl{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+  .ctl input[type=range]{width:110px;accent-color:var(--accent)}
+  .ctl select{background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:5px 7px;font-size:12px}
+  .ctl label{display:flex;align-items:center;gap:5px;cursor:pointer}
+  #canwrap{position:relative;flex:1;min-height:0}
+  canvas{width:100%;height:100%;display:block;outline:none}
+  #hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;color:var(--muted);pointer-events:none;padding:40px}
+  #hint div{max-width:440px}
+  #hint b{color:var(--text)}
+  kbd{background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:4px;padding:1px 6px;font-size:11px;color:var(--text)}
+  a{color:var(--accent)}
+  .back{display:block;padding:12px 16px 0;font-size:12px;color:var(--muted);text-decoration:none}
+  .back:hover{color:var(--text)}
+  #credits{padding:10px 16px 14px;border-top:1px solid var(--line);font-size:10.5px;color:var(--muted);line-height:1.5}
+  #credits a{color:var(--muted)}
+  @media (max-width:760px){
+    html,body{overflow:auto}
+    /* phones: viewer first (title, controls, image), then the scan list and credits */
+    #app{display:flex;flex-direction:column;height:auto}
+    #main{order:-1}
+    #canwrap{flex:none;height:62vh}
+    #side{border-right:none;border-top:1px solid var(--line)}
+    #side .back, #side h1{display:none}
+    #mobileHead{display:block}
+    .ctl input[type=range]{width:80px}
+  }
+  #mobileHead{display:none;background:var(--panel);padding:0 0 10px}
+  #mobileHead h1{font-size:15px;margin:0;padding:6px 16px 0}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <a class="back" href="/">← Alex's Lab</a>
+    <h1>MRI Viewer <small>3D slices and volume rendering in your browser</small></h1>
+    <div id="loadbar">
+      <button class="btn" id="pickFiles">📂 Open your own scan…</button>
+      <input type="file" id="fileInput" accept=".nii,.gz" multiple hidden>
+      <div id="status">Loading the sample scan…</div>
+    </div>
+    <div id="list"></div>
+    <div id="credits">
+      Your own files (NIfTI <code>.nii</code> / <code>.nii.gz</code>) are opened locally and never uploaded.
+      You can also drag a file onto the viewer.<br><br>
+      Sample head MRIs: Chris Rorden, McCausland Center for Brain Imaging,
+      <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>.
+      MNI brain: ICBM 152 Nonlinear 2009 atlas, © 1993–2009 Louis Collins, McConnell Brain Imaging Centre,
+      Montreal Neurological Institute, McGill University. Both via
+      <a href="https://github.com/niivue/niivue-demo-images">niivue-demo-images</a>.
+      Rendering by <a href="https://github.com/niivue/niivue">NiiVue</a> (BSD-2-Clause).
+    </div>
+  </aside>
+  <section id="main">
+    <div id="mobileHead"><a class="back" href="/">← Alex's Lab</a><h1>MRI Viewer</h1></div>
+    <div id="toolbar">
+      <div class="seg" id="viewSeg">
+        <button data-v="mpr">3-plane</button>
+        <button data-v="both" class="on">Both</button>
+        <button data-v="render">3D volume</button>
+      </div>
+      <div class="ctl">Colour
+        <select id="cmap">
+          <option value="gray" selected>Grayscale</option>
+          <option value="bone">Bone</option>
+          <option value="hot">Hot</option>
+          <option value="plasma">Plasma</option>
+          <option value="viridis">Viridis</option>
+          <option value="inferno">Inferno</option>
+        </select>
+      </div>
+      <div class="ctl">Brightness
+        <input type="range" id="winMax" min="0" max="100" value="80" title="Window max / brightness">
+      </div>
+      <div class="ctl">Threshold
+        <input type="range" id="winMin" min="0" max="100" value="2" title="Window min / background cutoff">
+      </div>
+      <div class="ctl"><label title="Slice into the 3D volume">
+        <input type="checkbox" id="clipOn"> Clip</label>
+        <input type="range" id="clipDepth" min="0" max="100" value="50" disabled>
+      </div>
+      <div class="ctl"><label title="Gradient shading for a more solid 3D look">
+        <input type="checkbox" id="shade"> Shading</label>
+      </div>
+      <button class="btn sec" id="reset" style="width:auto">Reset view</button>
+    </div>
+    <div id="toolbar2">
+      <span class="lbl">3D preset:</span>
+      <div class="seg" id="presetSeg">
+        <button data-p="soft">Soft tissue</button>
+        <button data-p="bright">Fat / marrow</button>
+        <button data-p="surface">Surface</button>
+        <button data-p="xray">X-ray</button>
+      </div>
+      <button class="btn sec" id="measure" style="width:auto">📏 Measure</button>
+      <span id="measHint" class="lbl" style="display:none">drag on a slice to measure · click again to clear</span>
+    </div>
+    <div id="canwrap">
+      <canvas id="gl"></canvas>
+      <div id="hint"><div>
+        <p style="font-size:16px">Loading the sample scan…</p>
+        <p style="font-size:12px;opacity:.8">In the 3D view: <kbd>drag</kbd> to rotate ·
+        <kbd>scroll</kbd> to zoom · <kbd>right-drag</kbd> to pan.<br>
+        In slice views: <kbd>scroll</kbd> to move through slices ·
+        <kbd>drag</kbd> to adjust brightness/contrast.</p>
+      </div></div>
+    </div>
+  </section>
+</div>
+
+<script src="./niivue.umd.js"></script>
+<script>
+// ---- Sample scans (openly licensed; see credits) ----
+const MANIFEST = {"volumes":[
+{"file":"samples/chris_t1.nii.gz","description":"Head MRI, T1-weighted","group":"Sample scans","tag":"T1","dims":[188,256,190],"spacing":[0.88,0.88,0.88]},
+{"file":"samples/chris_t2.nii.gz","description":"Head MRI, T2-weighted","group":"Sample scans","tag":"T2","dims":[188,256,190],"spacing":[0.88,0.88,0.88]},
+{"file":"samples/mni152.nii.gz","description":"MNI 152 brain template","group":"Sample scans","tag":"atlas","dims":[207,256,215],"spacing":[0.737,0.737,0.737]}
+]};
+
+const {Niivue, NVImage} = niivue;
+const nv = new Niivue({
+  backColor:[0.043,0.051,0.071,1],
+  show3Dcrosshair:true,
+  isColorbar:false,
+  crosshairColor:[0.30,0.55,1.0,1],
+  loadingText:'',   // keep the empty canvas blank so our own hint shows instead
+});
+nv.attachTo('gl');
+nv.opts.dragAndDropEnabled = true;
+
+const $ = s => document.querySelector(s);
+const listEl = $('#list'), statusEl = $('#status'), hintEl = $('#hint');
+let fileMap = new Map();   // name -> File the visitor opened (never uploaded)
+let current = null;        // active volume meta
+let viewMode = 'both';
+let loadSeq = 0;           // monotonic load id to discard superseded loads
+
+// ---------- Build the sidebar list ----------
+function niceName(v){
+  return v.description;
+}
+function buildList(){
+  listEl.innerHTML = '';
+  const groups = [...new Set(MANIFEST.volumes.map(v => v.group))];
+  for (const grp of groups){
+    const g = document.createElement('div'); g.className='grp'; g.textContent=grp;
+    listEl.appendChild(g);
+    MANIFEST.volumes.filter(v => v.group === grp).forEach(v => {
+      const el = document.createElement('div');
+      el.className = 'item';
+      el.dataset.file = v.file;
+      const meta = v.dims
+        ? `${v.dims.join('×')} · ${v.spacing.map(x=>x.toFixed(2)).join('×')} mm`
+        : 'Opened from your computer';
+      el.innerHTML = `<div class="t"></div><div class="m">${meta}</div>`;
+      el.querySelector('.t').textContent = niceName(v);
+      if (v.tag){ const t = document.createElement('span'); t.className='tag'; t.textContent=v.tag; el.querySelector('.t').appendChild(t); }
+      el.onclick = () => selectVolume(v, el);
+      listEl.appendChild(el);
+    });
+  }
+}
+buildList();
+
+// ---------- Loading ----------
+async function selectVolume(v, el){
+  document.querySelectorAll('.item').forEach(x=>x.classList.remove('active'));
+  el && el.classList.add('active');
+  statusEl.textContent = 'Loading '+niceName(v)+'…';
+  const seq = ++loadSeq;   // guard: ignore this load if a newer click supersedes it
+  try{
+    // Always load through NVImage.loadFromFile: a visitor's own file is read
+    // locally; a sample is fetched into a File first (with retries).
+    let file;
+    if (fileMap.has(v.file)){
+      file = fileMap.get(v.file);
+    } else {
+      const blob = await fetchWithRetry(v.file, 4);
+      file = new File([blob], v.file.split('/').pop());
+    }
+    const img = await NVImage.loadFromFile({file, name: file.name});
+    if (seq !== loadSeq) return;   // a newer selection won; drop this stale result
+    while(nv.volumes.length) nv.removeVolume(nv.volumes[0]);
+    nv.addVolume(img);
+    current = v;
+    hintEl.style.display = 'none';
+    nv.setOpacity(0, 1.0);
+    document.querySelectorAll('#presetSeg button').forEach(x=>x.classList.remove('on'));
+    applyColormap();
+    applyWindow();
+    applyView();
+    applyShade();
+    statusEl.innerHTML = 'Showing <b>'+niceName(v)+'</b>';
+  }catch(err){
+    if(seq !== loadSeq) return;   // superseded by a newer click; stay quiet
+    console.error(err);
+    statusEl.innerHTML = 'Couldn’t load <b>'+niceName(v)+'</b>. '+
+      '<a href="#" id="retryLoad">Try again</a>. Own files must be NIfTI (.nii or .nii.gz).';
+    const r = document.getElementById('retryLoad');
+    if(r) r.onclick = ev => { ev.preventDefault(); selectVolume(v, el); };
+  }
+}
+
+// Fetch a URL as a Blob, retrying on transient failures (server busy / reset).
+async function fetchWithRetry(url, tries){
+  let last;
+  for(let i=0;i<tries;i++){
+    try{
+      const r = await fetch(url, {cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return await r.blob();
+    }catch(e){
+      last = e;
+      await new Promise(res=>setTimeout(res, 300*(i+1)));
+    }
+  }
+  throw last;
+}
+
+// ---------- Open your own files (read locally, never uploaded) ----------
+$('#pickFiles').onclick = ()=> $('#fileInput').click();
+$('#fileInput').onchange = e=>{
+  const files = [...e.target.files].filter(f=>/\.nii(\.gz)?$/i.test(f.name));
+  e.target.value = '';
+  if(!files.length){ statusEl.textContent='Please choose NIfTI files (.nii or .nii.gz).'; return; }
+  let first = null;
+  for (const f of files){
+    const key = 'local:' + f.name;
+    fileMap.set(key, f);
+    if (!MANIFEST.volumes.some(v => v.file === key))
+      MANIFEST.volumes.push({file:key, description:f.name, group:'Your files'});
+    first = first || key;
+  }
+  buildList();
+  const v = MANIFEST.volumes.find(x => x.file === first);
+  selectVolume(v, [...document.querySelectorAll('.item')].find(x=>x.dataset.file===first));
+};
+
+// Open the T1 sample on arrival.
+selectVolume(MANIFEST.volumes[0], document.querySelector('.item'));
+
+// ---------- View mode ----------
+$('#viewSeg').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  viewMode = b.dataset.v;
+  document.querySelectorAll('#viewSeg button').forEach(x=>x.classList.toggle('on',x===b));
+  applyView();
+});
+function applyView(){
+  if(!nv.volumes.length) return;
+  if(viewMode==='render'){
+    nv.setSliceType(nv.sliceTypeRender);
+  } else {
+    nv.setSliceType(nv.sliceTypeMultiplanar);
+    // show the 3D render tile in the 4th quadrant for "both"
+    try{ nv.opts.multiplanarShowRender = (viewMode==='both') ? 1 : 0; }catch(_){}
+    if('multiplanarForceRender' in nv.opts) nv.opts.multiplanarForceRender = (viewMode==='both');
+  }
+  nv.drawScene();
+}
+
+// ---------- Colormap ----------
+$('#cmap').onchange = applyColormap;
+function applyColormap(){
+  if(!nv.volumes.length) return;
+  nv.setColormap(nv.volumes[0].id, $('#cmap').value);
+  applyWindow();  // setColormap resets cal_min/max -> restore the window
+}
+
+// ---------- Window / level (brightness & threshold) ----------
+$('#winMin').oninput = applyWindow;
+$('#winMax').oninput = applyWindow;
+function applyWindow(){
+  if(!nv.volumes.length) return;
+  const vol = nv.volumes[0];
+  const lo = vol.robust_min ?? vol.cal_min, hi = vol.robust_max ?? vol.cal_max;
+  const range = (hi-lo) || 1;
+  const minP = +$('#winMin').value/100, maxP = +$('#winMax').value/100;
+  vol.cal_min = lo + range*minP;                 // threshold: raise floor
+  vol.cal_max = lo + range*maxP*1.3;             // brightness: scale ceiling (allow overdrive)
+  nv.updateGLVolume();
+}
+
+// ---------- 3D tissue presets ----------
+// each: winMin%, winMax%, colormap, volume opacity  (mainly affect the 3D render)
+const PRESETS = {
+  soft:    {min:12, max:62, cmap:'gray', op:1.0},
+  bright:  {min:48, max:92, cmap:'gray', op:1.0},
+  surface: {min:6,  max:55, cmap:'gray', op:1.0},
+  xray:    {min:8,  max:78, cmap:'bone', op:0.45},
+};
+$('#presetSeg').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b || !nv.volumes.length) return;
+  const p = PRESETS[b.dataset.p]; if(!p) return;
+  document.querySelectorAll('#presetSeg button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#winMin').value = p.min; $('#winMax').value = p.max;
+  $('#cmap').value = p.cmap;
+  nv.setColormap(nv.volumes[0].id, p.cmap);  // must precede window (setColormap resets cal)
+  applyWindow();
+  nv.setOpacity(0, p.op);
+  // presets are about the 3D look — make sure it's visible
+  if(viewMode === 'mpr'){ viewMode='both';
+    document.querySelectorAll('#viewSeg button').forEach(x=>x.classList.toggle('on',x.dataset.v==='both'));
+    applyView();
+  }
+  nv.drawScene();
+});
+
+// ---------- Measure (ruler) ----------
+let measuring = false;
+$('#measure').onclick = ()=>{
+  if(!nv.volumes.length) return;
+  measuring = !measuring;
+  $('#measure').classList.toggle('on', measuring);
+  $('#measHint').style.display = measuring ? '' : 'none';
+  try{
+    nv.opts.dragMode = measuring ? nv.dragModes.measurement : nv.dragModes.contrast;
+  }catch(_){ nv.opts.dragMode = measuring ? 1 : 0; }
+  // need slices to measure on
+  if(measuring && viewMode==='render'){ viewMode='both';
+    document.querySelectorAll('#viewSeg button').forEach(x=>x.classList.toggle('on',x.dataset.v==='both'));
+    applyView();
+  }
+  nv.drawScene();
+};
+
+// ---------- Clip plane (cut into 3D) ----------
+$('#clipOn').onchange = e=>{
+  $('#clipDepth').disabled = !e.target.checked;
+  applyClip();
+};
+$('#clipDepth').oninput = applyClip;
+function applyClip(){
+  if($('#clipOn').checked){
+    const d = (+$('#clipDepth').value/100 - 0.5);   // -0.5..0.5
+    nv.setClipPlane([d, 270, 0]);                    // depth, azimuth, elevation
+  } else {
+    nv.setClipPlane([2, 270, 0]);                    // depth>1 => disabled
+  }
+}
+
+// ---------- Shading ----------
+$('#shade').onchange = applyShade;
+function applyShade(){
+  try{ nv.setVolumeRenderIllumination($('#shade').checked ? 1.0 : 0.0); }catch(_){}
+}
+
+// ---------- Reset ----------
+$('#reset').onclick = ()=>{
+  nv.setRenderAzimuthElevation(120, 15);
+  if(nv.scene){ nv.scene.volScaleMultiplier = 1.0; }
+  $('#winMin').value=2; $('#winMax').value=80; applyWindow();
+  $('#clipOn').checked=false; $('#clipDepth').disabled=true; applyClip();
+  nv.drawScene();
+};
+</script>
+</body>
+</html>
